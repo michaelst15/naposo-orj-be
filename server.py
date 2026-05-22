@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import asyncpg
@@ -16,6 +16,13 @@ load_dotenv(ROOT_DIR / ".env")
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+
+def get_db_pool():
+    pool = getattr(app.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL belum di-set.")
+    return pool
 
 
 class Member(BaseModel):
@@ -184,7 +191,8 @@ async def _ensure_schema(conn: asyncpg.Connection) -> None:
 async def startup() -> None:
     database_url = os.environ.get("DATABASE_URL", "").strip().strip('"').strip("'")
     if not database_url:
-        raise RuntimeError("DATABASE_URL belum di-set. Isi app/backend/.env dengan connection string PostgreSQL.")
+        app.state.db_pool = None
+        return
 
     ssl = "require" if "sslmode=require" in database_url else None
     app.state.db_pool = await asyncpg.create_pool(dsn=database_url, ssl=ssl, min_size=1, max_size=5)
@@ -200,13 +208,23 @@ async def shutdown() -> None:
         await pool.close()
 
 
+@app.get("/")
+async def health():
+    return {"status": "ok"}
+
+
 @api_router.get("/")
 async def root():
     return {"message": "Naposo ORJ API"}
 
 
 @api_router.get("/members", response_model=List[Member])
-async def get_members(angkatan: Optional[str] = None, posisi: Optional[str] = None, search: Optional[str] = None):
+async def get_members(
+    angkatan: Optional[str] = None,
+    posisi: Optional[str] = None,
+    search: Optional[str] = None,
+    pool=Depends(get_db_pool),
+):
     where = []
     args: List[Any] = []
 
@@ -224,15 +242,15 @@ async def get_members(angkatan: Optional[str] = None, posisi: Optional[str] = No
     if where:
         sql += " WHERE " + " AND ".join(where)
 
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         rows = await conn.fetch(sql, *args)
     return [_row_to_dict(r) for r in rows]
 
 
 @api_router.post("/members", response_model=Member)
-async def create_member(member: MemberCreate):
+async def create_member(member: MemberCreate, pool=Depends(get_db_pool)):
     member_obj = Member(**member.model_dump())
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO members (id, nama, angkatan, posisi, foto, bio, kontak)
@@ -250,8 +268,8 @@ async def create_member(member: MemberCreate):
 
 
 @api_router.delete("/members/{member_id}")
-async def delete_member(member_id: str):
-    async with app.state.db_pool.acquire() as conn:
+async def delete_member(member_id: str, pool=Depends(get_db_pool)):
+    async with pool.acquire() as conn:
         result = await conn.execute("DELETE FROM members WHERE id = $1", member_id)
     deleted = int(result.split()[-1]) if result else 0
     if deleted == 0:
@@ -260,8 +278,8 @@ async def delete_member(member_id: str):
 
 
 @api_router.get("/pengurus", response_model=List[Pengurus])
-async def get_pengurus():
-    async with app.state.db_pool.acquire() as conn:
+async def get_pengurus(pool=Depends(get_db_pool)):
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, nama, posisi, foto, bio, urutan FROM pengurus ORDER BY urutan ASC"
         )
@@ -269,9 +287,9 @@ async def get_pengurus():
 
 
 @api_router.post("/pengurus", response_model=Pengurus)
-async def create_pengurus(pengurus: PengurusCreate):
+async def create_pengurus(pengurus: PengurusCreate, pool=Depends(get_db_pool)):
     pengurus_obj = Pengurus(**pengurus.model_dump())
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO pengurus (id, nama, posisi, foto, bio, urutan)
@@ -288,22 +306,22 @@ async def create_pengurus(pengurus: PengurusCreate):
 
 
 @api_router.get("/activities", response_model=List[Activity])
-async def get_activities(status: Optional[str] = None):
+async def get_activities(status: Optional[str] = None, pool=Depends(get_db_pool)):
     sql = "SELECT id, judul, deskripsi, tanggal, status, gambar FROM activities"
     args: List[Any] = []
     if status:
         args.append(status)
         sql += f" WHERE status = ${len(args)}"
 
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         rows = await conn.fetch(sql, *args)
     return [_row_to_dict(r) for r in rows]
 
 
 @api_router.post("/activities", response_model=Activity)
-async def create_activity(activity: ActivityCreate):
+async def create_activity(activity: ActivityCreate, pool=Depends(get_db_pool)):
     activity_obj = Activity(**activity.model_dump())
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO activities (id, judul, deskripsi, tanggal, status, gambar)
@@ -320,16 +338,16 @@ async def create_activity(activity: ActivityCreate):
 
 
 @api_router.get("/gallery", response_model=List[Gallery])
-async def get_gallery():
-    async with app.state.db_pool.acquire() as conn:
+async def get_gallery(pool=Depends(get_db_pool)):
+    async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, judul, gambar, tanggal, deskripsi FROM gallery")
     return [_row_to_dict(r) for r in rows]
 
 
 @api_router.post("/gallery", response_model=Gallery)
-async def create_gallery(gallery: GalleryCreate):
+async def create_gallery(gallery: GalleryCreate, pool=Depends(get_db_pool)):
     gallery_obj = Gallery(**gallery.model_dump())
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO gallery (id, judul, gambar, tanggal, deskripsi)
@@ -345,9 +363,9 @@ async def create_gallery(gallery: GalleryCreate):
 
 
 @api_router.post("/registrations", response_model=Registration)
-async def create_registration(registration: RegistrationCreate):
+async def create_registration(registration: RegistrationCreate, pool=Depends(get_db_pool)):
     reg_obj = Registration(**registration.model_dump())
-    async with app.state.db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO registrations (id, nama, email, telepon, angkatan, alasan)
@@ -365,8 +383,8 @@ async def create_registration(registration: RegistrationCreate):
 
 
 @api_router.get("/registrations", response_model=List[Registration])
-async def get_registrations():
-    async with app.state.db_pool.acquire() as conn:
+async def get_registrations(pool=Depends(get_db_pool)):
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, nama, email, telepon, angkatan, alasan, tanggal_daftar FROM registrations ORDER BY tanggal_daftar DESC"
         )
@@ -374,8 +392,8 @@ async def get_registrations():
 
 
 @api_router.post("/seed")
-async def seed_data():
-    async with app.state.db_pool.acquire() as conn:
+async def seed_data(pool=Depends(get_db_pool)):
+    async with pool.acquire() as conn:
         async with conn.transaction():
             await _ensure_schema(conn)
             await conn.execute("TRUNCATE TABLE members, pengurus, activities, gallery, registrations")
