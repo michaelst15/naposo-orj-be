@@ -1008,6 +1008,10 @@ func (a *App) getRegistrations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) seedData(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(strings.ToLower(os.Getenv("ALLOW_SEED"))) != "true" {
+		writeJSON(w, http.StatusForbidden, map[string]any{"detail": "seed disabled"})
+		return
+	}
 	if !a.requireDB(w) {
 		return
 	}
