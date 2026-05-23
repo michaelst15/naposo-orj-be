@@ -144,19 +144,28 @@ func main() {
 
 		api.Get("/members", app.getMembers)
 		api.Post("/members", app.createMember)
+		api.Put("/members/{memberID}", app.updateMember)
 		api.Delete("/members/{memberID}", app.deleteMember)
 
 		api.Get("/pengurus", app.getPengurus)
 		api.Post("/pengurus", app.createPengurus)
+		api.Put("/pengurus/{pengurusID}", app.updatePengurus)
+		api.Delete("/pengurus/{pengurusID}", app.deletePengurus)
 
 		api.Get("/activities", app.getActivities)
 		api.Post("/activities", app.createActivity)
+		api.Put("/activities/{activityID}", app.updateActivity)
+		api.Delete("/activities/{activityID}", app.deleteActivity)
 
 		api.Get("/gallery", app.getGallery)
 		api.Post("/gallery", app.createGallery)
+		api.Put("/gallery/{galleryID}", app.updateGallery)
+		api.Delete("/gallery/{galleryID}", app.deleteGallery)
 
 		api.Post("/registrations", app.createRegistration)
 		api.Get("/registrations", app.getRegistrations)
+		api.Put("/registrations/{registrationID}", app.updateRegistration)
+		api.Delete("/registrations/{registrationID}", app.deleteRegistration)
 
 		api.Post("/seed", app.seedData)
 	})
@@ -384,6 +393,54 @@ func (a *App) createMember(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, m)
 }
 
+func (a *App) updateMember(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "memberID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "member_id kosong"})
+		return
+	}
+
+	var in MemberCreate
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid json"})
+		return
+	}
+
+	nama := strings.TrimSpace(in.Nama)
+	angkatan := strings.TrimSpace(in.Angkatan)
+	posisi := strings.TrimSpace(in.Posisi)
+	foto := strings.TrimSpace(in.Foto)
+	bio := strings.TrimSpace(in.Bio)
+	kontak := strings.TrimSpace(in.Kontak)
+
+	if nama == "" || angkatan == "" || posisi == "" || foto == "" || bio == "" || kontak == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "field wajib belum lengkap"})
+		return
+	}
+
+	var m Member
+	err := a.db.QueryRow(ctx, `
+		UPDATE members
+		SET nama = $2, angkatan = $3, posisi = $4, foto = $5, bio = $6, kontak = $7
+		WHERE id = $1
+		RETURNING id, nama, angkatan, posisi, foto, bio, kontak
+	`, id, nama, angkatan, posisi, foto, bio, kontak).Scan(&m.ID, &m.Nama, &m.Angkatan, &m.Posisi, &m.Foto, &m.Bio, &m.Kontak)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Member not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, m)
+}
+
 func (a *App) deleteMember(w http.ResponseWriter, r *http.Request) {
 	if !a.requireDB(w) {
 		return
@@ -406,6 +463,76 @@ func (a *App) deleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"message": "Member deleted"})
+}
+
+func (a *App) updatePengurus(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "pengurusID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "pengurus_id kosong"})
+		return
+	}
+
+	var in PengurusCreate
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid json"})
+		return
+	}
+
+	nama := strings.TrimSpace(in.Nama)
+	posisi := strings.TrimSpace(in.Posisi)
+	foto := strings.TrimSpace(in.Foto)
+	bio := strings.TrimSpace(in.Bio)
+	urutan := in.Urutan
+
+	if nama == "" || posisi == "" || foto == "" || bio == "" || urutan == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "field wajib belum lengkap"})
+		return
+	}
+
+	var p Pengurus
+	err := a.db.QueryRow(ctx, `
+		UPDATE pengurus
+		SET nama = $2, posisi = $3, foto = $4, bio = $5, urutan = $6
+		WHERE id = $1
+		RETURNING id, nama, posisi, foto, bio, urutan
+	`, id, nama, posisi, foto, bio, urutan).Scan(&p.ID, &p.Nama, &p.Posisi, &p.Foto, &p.Bio, &p.Urutan)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Pengurus not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (a *App) deletePengurus(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "pengurusID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "pengurus_id kosong"})
+		return
+	}
+
+	ct, err := a.db.Exec(ctx, "DELETE FROM pengurus WHERE id = $1", id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Pengurus not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Pengurus deleted"})
 }
 
 func (a *App) getPengurus(w http.ResponseWriter, r *http.Request) {
@@ -469,6 +596,75 @@ func (a *App) createPengurus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, p)
+}
+
+func (a *App) updateActivity(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "activityID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "activity_id kosong"})
+		return
+	}
+
+	var in ActivityCreate
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid json"})
+		return
+	}
+
+	judul := strings.TrimSpace(in.Judul)
+	deskripsi := strings.TrimSpace(in.Deskripsi)
+	tanggal := strings.TrimSpace(in.Tanggal)
+	status := strings.TrimSpace(in.Status)
+	gambar := strings.TrimSpace(in.Gambar)
+
+	if judul == "" || deskripsi == "" || tanggal == "" || status == "" || gambar == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "field wajib belum lengkap"})
+		return
+	}
+
+	var act Activity
+	err := a.db.QueryRow(ctx, `
+		UPDATE activities
+		SET judul = $2, deskripsi = $3, tanggal = $4, status = $5, gambar = $6
+		WHERE id = $1
+		RETURNING id, judul, deskripsi, tanggal, status, gambar
+	`, id, judul, deskripsi, tanggal, status, gambar).Scan(&act.ID, &act.Judul, &act.Deskripsi, &act.Tanggal, &act.Status, &act.Gambar)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Activity not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, act)
+}
+
+func (a *App) deleteActivity(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "activityID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "activity_id kosong"})
+		return
+	}
+	ct, err := a.db.Exec(ctx, "DELETE FROM activities WHERE id = $1", id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Activity not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Activity deleted"})
 }
 
 func (a *App) getActivities(w http.ResponseWriter, r *http.Request) {
@@ -542,6 +738,72 @@ func (a *App) createActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, act)
 }
 
+func (a *App) updateGallery(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "galleryID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "gallery_id kosong"})
+		return
+	}
+
+	var in GalleryCreate
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid json"})
+		return
+	}
+
+	judul := strings.TrimSpace(in.Judul)
+	gambar := strings.TrimSpace(in.Gambar)
+	tanggal := strings.TrimSpace(in.Tanggal)
+	deskripsi := strings.TrimSpace(in.Deskripsi)
+	if judul == "" || gambar == "" || tanggal == "" || deskripsi == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "field wajib belum lengkap"})
+		return
+	}
+
+	var g Gallery
+	err := a.db.QueryRow(ctx, `
+		UPDATE gallery
+		SET judul = $2, gambar = $3, tanggal = $4, deskripsi = $5
+		WHERE id = $1
+		RETURNING id, judul, gambar, tanggal, deskripsi
+	`, id, judul, gambar, tanggal, deskripsi).Scan(&g.ID, &g.Judul, &g.Gambar, &g.Tanggal, &g.Deskripsi)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Gallery not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+func (a *App) deleteGallery(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "galleryID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "gallery_id kosong"})
+		return
+	}
+	ct, err := a.db.Exec(ctx, "DELETE FROM gallery WHERE id = $1", id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Gallery not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Gallery deleted"})
+}
+
 func (a *App) getGallery(w http.ResponseWriter, r *http.Request) {
 	if !a.requireDB(w) {
 		return
@@ -602,6 +864,76 @@ func (a *App) createGallery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, g)
+}
+
+func (a *App) updateRegistration(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "registrationID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "registration_id kosong"})
+		return
+	}
+
+	var in RegistrationCreate
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid json"})
+		return
+	}
+
+	nama := strings.TrimSpace(in.Nama)
+	email := strings.TrimSpace(in.Email)
+	telepon := strings.TrimSpace(in.Telepon)
+	angkatan := strings.TrimSpace(in.Angkatan)
+	alasan := strings.TrimSpace(in.Alasan)
+
+	if nama == "" || email == "" || telepon == "" || angkatan == "" || alasan == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "field wajib belum lengkap"})
+		return
+	}
+
+	var reg Registration
+	var ts time.Time
+	err := a.db.QueryRow(ctx, `
+		UPDATE registrations
+		SET nama = $2, email = $3, telepon = $4, angkatan = $5, alasan = $6
+		WHERE id = $1
+		RETURNING id, nama, email, telepon, angkatan, alasan, tanggal_daftar
+	`, id, nama, email, telepon, angkatan, alasan).Scan(&reg.ID, &reg.Nama, &reg.Email, &reg.Telepon, &reg.Angkatan, &reg.Alasan, &ts)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Registration not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+	reg.TanggalDaftar = ts.UTC().Format(time.RFC3339)
+	writeJSON(w, http.StatusOK, reg)
+}
+
+func (a *App) deleteRegistration(w http.ResponseWriter, r *http.Request) {
+	if !a.requireDB(w) {
+		return
+	}
+	ctx := r.Context()
+	id := strings.TrimSpace(chi.URLParam(r, "registrationID"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "registration_id kosong"})
+		return
+	}
+	ct, err := a.db.Exec(ctx, "DELETE FROM registrations WHERE id = $1", id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Registration not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Registration deleted"})
 }
 
 func (a *App) createRegistration(w http.ResponseWriter, r *http.Request) {
